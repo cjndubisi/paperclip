@@ -18,7 +18,7 @@ services:
           cpus: '1.0'
           memory: 1G
 
-  server:
+  paperclip:
     build:
       context: ..
       dockerfile: Dockerfile
@@ -42,18 +42,19 @@ services:
       SERVE_UI: "true"
       PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "public"
-      # Coolify-managed magic domain: SERVICE_FQDN_SERVER_3100 makes Coolify
-      # generate/track a domain for this service+port, injected as a plain
-      # (already-resolved) SERVICE_URL_SERVER_3100 key into the container's
+      # Coolify-managed magic domain: the service is named `paperclip`, so
+      # SERVICE_FQDN_PAPERCLIP_3100 makes Coolify auto-generate a domain named
+      # paperclip-<uuid>.coolify.craftsofchijioke.com and inject it as a plain
+      # (already-resolved) SERVICE_URL_PAPERCLIP_3100 key into the container's
       # runtime env. NOTE: it can't be referenced here as
-      # "${SERVICE_URL_SERVER_3100}" -- Compose only interpolates ${...}
+      # "${SERVICE_URL_PAPERCLIP_3100}" -- Compose only interpolates ${...}
       # against the shell/.env at parse time, before Coolify's magic-var
       # injection happens, so that reference silently resolves to "" and
       # Paperclip refuses to boot. docker-entrypoint.sh instead falls back
       # to Coolify's COOLIFY_URL (also a plain runtime key) when
       # PAPERCLIP_PUBLIC_URL is unset -- change the domain in the Domains
       # tab and it's picked up on the next restart via that same fallback.
-      SERVICE_FQDN_SERVER_3100: ""
+      SERVICE_FQDN_PAPERCLIP_3100: ""
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
       # OmniRoute (self-hosted OpenAI-compatible gateway) wired as the default
       # LLM provider for adapters that read OPENAI_API_KEY directly.
