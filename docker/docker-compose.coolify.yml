@@ -19,9 +19,68 @@ services:
           memory: 1G
 
   paperclip:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    # Prebuilt upstream image instead of a local `build:` context.
+    #
+    # Upstream's .github/workflows/docker.yml publishes a PUBLIC multi-arch
+    # image to GHCR for every master commit (`sha-<short>`), every release
+    # (`vX.Y.Z` + `latest`), and the nightly/beta/canary channels. Building
+    # from source on the VPS reproduced an image that already exists: it cost
+    # ~13 min of CPU and left a 5.06GB local image, versus a ~1.6GB pull.
+    #
+    # PINNED, NOT FLOATING. The tag is pinned to a specific commit so a
+    # redeploy can never silently move the code or the DB schema underneath
+    # a running instance. Upgrading is a deliberate act: change
+    # PAPERCLIP_IMAGE_TAG in Coolify's env vars and redeploy. Rolling back is
+    # the same edit in reverse, and the old image is still in the registry.
+    #
+    # !! DO NOT USE `:latest` HERE !!
+    # `latest` tracks the last tagged RELEASE, which lags master badly. At the
+    # time of writing `latest` = v2026.831.1 shipping 229 migrations, while
+    # this deployment's database is at 270. Pointing at `latest` is a schema
+    # DOWNGRADE against a live database. Always pick a tag whose
+    # `io.github.paperclipai.schema.migration-count` label is >= the count the
+    # running instance has already applied; see docs/coolify-upgrade.md for
+    # the one-command check that reads those labels from the registry without
+    # pulling the image.
+    image: "ghcr.io/paperclipai/paperclip:${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
+
+    # Coolify-domain fallback, previously a patch to scripts/docker-entrypoint.sh.
+    #
+    # Keeping it here instead of in the image is what lets this branch consume
+    # upstream images unmodified: the fork now carries NO source changes, only
+    # this compose file, so rebasing onto a newer upstream can't conflict.
+    #
+    # Why it's needed: Coolify's magic SERVICE_FQDN_*/SERVICE_URL_* vars are
+    # injected as plain already-resolved keys at RUNTIME. Compose only
+    # interpolates ${...} against the shell/.env at PARSE time, before that
+    # injection, so referencing "${SERVICE_URL_PAPERCLIP_3100}" as another
+    # variable's value silently yields "" and Paperclip refuses to boot with
+    # "authenticated public exposure requires auth.baseUrlMode=explicit".
+    # COOLIFY_URL is also injected as a plain runtime key, so we read it from
+    # inside the container where the value actually exists.
+    #
+    # `$$` escapes compose's own interpolation so the shell sees a literal `$`.
+    # tini is kept as PID 1 (matching the image's own ENTRYPOINT) so orphaned
+    # agent descendants are still reaped; the final `sh` is the $0 placeholder
+    # for `sh -c`, which makes the command below arrive as "$@".
+    entrypoint:
+      - /usr/bin/tini
+      - "--"
+      - /bin/sh
+      - -c
+      - 'if [ -z "$$PAPERCLIP_PUBLIC_URL" ] && [ -n "$$COOLIFY_URL" ]; then export PAPERCLIP_PUBLIC_URL="$$COOLIFY_URL"; fi; exec docker-entrypoint.sh "$$@"'
+      - sh
+
+    # Overriding `entrypoint:` CLEARS the image's CMD (documented Compose
+    # behaviour), so the image's default command has to be restated verbatim
+    # or the container starts tini with nothing to run and exits instantly.
+    # Mirrors the Dockerfile's CMD.
+    command:
+      - node
+      - --import
+      - ./server/node_modules/tsx/dist/loader.mjs
+      - server/dist/index.js
+
     # pids_limit intentionally omitted: Coolify injects its own
     # deploy.resources.limits.pids when a resource-limits policy is set on
     # this app, and Compose refuses to build when both pids_limit and
@@ -30,7 +89,7 @@ services:
     # 'deploy.resources.limits.pids': invalid compose project"). Set a PID
     # ceiling via the app's Resource Limits tab in Coolify instead if needed.
     # Exposes the container port to Coolify's proxy without publishing it on
-    # the host. Combined with SERVICE_FQDN_SERVER_3100 below, this is what
+    # the host. Combined with SERVICE_FQDN_PAPERCLIP_3100 below, this is what
     # tells Coolify to auto-manage a domain for this service (visible/editable
     # under the resource's Domains tab, and re-injected into the container on
     # every restart/redeploy).
@@ -46,14 +105,10 @@ services:
       # SERVICE_FQDN_PAPERCLIP_3100 makes Coolify auto-generate a domain named
       # paperclip-<uuid>.coolify.craftsofchijioke.com and inject it as a plain
       # (already-resolved) SERVICE_URL_PAPERCLIP_3100 key into the container's
-      # runtime env. NOTE: it can't be referenced here as
-      # "${SERVICE_URL_PAPERCLIP_3100}" -- Compose only interpolates ${...}
-      # against the shell/.env at parse time, before Coolify's magic-var
-      # injection happens, so that reference silently resolves to "" and
-      # Paperclip refuses to boot. docker-entrypoint.sh instead falls back
-      # to Coolify's COOLIFY_URL (also a plain runtime key) when
-      # PAPERCLIP_PUBLIC_URL is unset -- change the domain in the Domains
-      # tab and it's picked up on the next restart via that same fallback.
+      # runtime env. It can't be referenced here as a value (see the entrypoint
+      # note above) -- the entrypoint wrapper reads COOLIFY_URL at runtime
+      # instead, so changing the domain in the Domains tab is picked up on the
+      # next restart with no compose edit.
       SERVICE_FQDN_PAPERCLIP_3100: ""
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
       # OmniRoute (self-hosted OpenAI-compatible gateway) wired as the default
