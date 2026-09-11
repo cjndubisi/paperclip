@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: paperclip
+      POSTGRES_PASSWORD: paperclip
+      POSTGRES_DB: paperclip
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperclip -d paperclip"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    pids_limit: 2048
+    environment:
+      DATABASE_URL: postgres://paperclip:paperclip@db:5432/paperclip
+      PORT: "3100"
+      SERVE_UI: "true"
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "public"
+      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:?PAPERCLIP_PUBLIC_URL must be set}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
+      # OmniRoute (self-hosted OpenAI-compatible gateway) wired as the default
+      # LLM provider for adapters that read OPENAI_API_KEY directly.
+      OPENAI_API_KEY: "${OMNIROUTE_API_KEY:-}"
+      OPENAI_BASE_URL: "${OMNIROUTE_BASE_URL:-}"
+      # Codex adapter has no env-based base URL override; it needs an explicit
+      # [model_providers.*] table injected via this JSON env var.
+      PAPERCLIP_CODEX_PROVIDERS: '{"providers":{"omniroute":{"name":"OmniRoute","base_url":"${OMNIROUTE_BASE_URL}","env_key":"OPENAI_API_KEY","wire_api":"chat"}},"model_provider":"omniroute"}'
+    volumes:
+      - paperclip-data:/paperclip
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+
+volumes:
+  pgdata:
+  paperclip-data:
