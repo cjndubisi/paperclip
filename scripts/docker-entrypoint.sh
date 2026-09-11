@@ -1,6 +1,20 @@
 #!/bin/sh
 set -e
 
+# Coolify's magic SERVICE_FQDN_*/SERVICE_URL_* vars are only substituted
+# into the KEYS it recognizes at deploy time -- it does not do a second
+# interpolation pass for ${SERVICE_URL_...} references used as another
+# variable's VALUE inside the same compose file (plain `docker compose`
+# only interpolates against the shell/.env, so those refs resolve to an
+# empty string and Paperclip's own startup check then refuses to boot
+# with "authenticated public exposure requires auth.baseUrlMode=explicit").
+# COOLIFY_URL is injected as a plain, already-resolved key on every
+# Coolify-managed app, so use it as the source of truth when
+# PAPERCLIP_PUBLIC_URL wasn't provided directly.
+if [ -z "$PAPERCLIP_PUBLIC_URL" ] && [ -n "$COOLIFY_URL" ]; then
+    export PAPERCLIP_PUBLIC_URL="$COOLIFY_URL"
+fi
+
 # Capture runtime UID/GID from environment variables, defaulting to 1000
 PUID=${USER_UID:-1000}
 PGID=${USER_GID:-1000}
