@@ -22,7 +22,13 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    pids_limit: 2048
+    # pids_limit intentionally omitted: Coolify injects its own
+    # deploy.resources.limits.pids when a resource-limits policy is set on
+    # this app, and Compose refuses to build when both pids_limit and
+    # deploy.resources.limits.pids are present with different values
+    # ("can't set distinct values on 'pids_limit' and
+    # 'deploy.resources.limits.pids': invalid compose project"). Set a PID
+    # ceiling via the app's Resource Limits tab in Coolify instead if needed.
     # Exposes the container port to Coolify's proxy without publishing it on
     # the host. Combined with SERVICE_FQDN_SERVER_3100 below, this is what
     # tells Coolify to auto-manage a domain for this service (visible/editable
