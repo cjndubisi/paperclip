@@ -23,13 +23,25 @@ services:
       context: ..
       dockerfile: Dockerfile
     pids_limit: 2048
+    # Exposes the container port to Coolify's proxy without publishing it on
+    # the host. Combined with SERVICE_FQDN_SERVER_3100 below, this is what
+    # tells Coolify to auto-manage a domain for this service (visible/editable
+    # under the resource's Domains tab, and re-injected into the container on
+    # every restart/redeploy).
+    expose:
+      - "3100"
     environment:
       DATABASE_URL: postgres://paperclip:paperclip@db:5432/paperclip
       PORT: "3100"
       SERVE_UI: "true"
       PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "public"
-      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:?PAPERCLIP_PUBLIC_URL must be set}"
+      # Coolify-managed magic domain: SERVICE_FQDN_SERVER_3100 makes Coolify
+      # generate/track a domain for this service+port; SERVICE_URL_SERVER_3100
+      # is the resolved "https://<domain>" value, re-injected on every
+      # restart/redeploy if you change the domain in the Domains tab.
+      SERVICE_FQDN_SERVER_3100: ""
+      PAPERCLIP_PUBLIC_URL: "${SERVICE_URL_SERVER_3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
       # OmniRoute (self-hosted OpenAI-compatible gateway) wired as the default
       # LLM provider for adapters that read OPENAI_API_KEY directly.
