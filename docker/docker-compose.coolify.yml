@@ -127,15 +127,7 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          # 3G was not enough headroom and the cgroup OOM-killed agent child
-          # processes under normal fan-out: the server alone holds ~850 MB, each
-          # plugin worker ~100 MB, and a directory sync buffers a whole tar
-          # archive in memory. Kills surface as `process_lost -- child pid N is
-          # no longer running`, and every killed run mints an
-          # `execution_reconciliation_required` hold, so an OOM cascades into a
-          # blocked board rather than a clean failure. Raise before trimming
-          # concurrency; Node's own heap ceiling (~1.7 GB) is separate from this.
-          memory: 6G
+          memory: 3G
 
 volumes:
   pgdata:
