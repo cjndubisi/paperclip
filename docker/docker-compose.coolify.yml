@@ -68,7 +68,7 @@ services:
       - "--"
       - /bin/sh
       - -c
-      - 'if [ -z "$$PAPERCLIP_PUBLIC_URL" ] && [ -n "$$COOLIFY_URL" ]; then export PAPERCLIP_PUBLIC_URL="$$COOLIFY_URL"; fi; exec docker-entrypoint.sh "$$@"'
+      - 'if [ -z "$$PAPERCLIP_PUBLIC_URL" ] && [ -n "$$COOLIFY_URL" ]; then export PAPERCLIP_PUBLIC_URL="$$COOLIFY_URL"; fi; mkdir -p /paperclip/patches; cp /opt/paperclip-overlays/apply.py /paperclip/patches/apply-paperclip-runtime-overlays.py; chown node:node /paperclip/patches/apply-paperclip-runtime-overlays.py; python3 /paperclip/patches/apply-paperclip-runtime-overlays.py; exec docker-entrypoint.sh "$$@"'
       - sh
 
     # Overriding `entrypoint:` CLEARS the image's CMD (documented Compose
@@ -120,6 +120,11 @@ services:
       PAPERCLIP_CODEX_PROVIDERS: '{"providers":{"omniroute":{"name":"OmniRoute","base_url":"${OMNIROUTE_BASE_URL}","env_key":"OPENAI_API_KEY","wire_api":"chat"}},"model_provider":"omniroute"}'
     volumes:
       - paperclip-data:/paperclip
+      # The overlay script is versioned on this deployment branch and mounted
+      # read-only outside the persistent data volume. The entrypoint copies the
+      # current version into /paperclip/patches before applying it, so an old
+      # persisted script cannot silently survive a redeploy.
+      - ./apply-paperclip-runtime-overlays.py:/opt/paperclip-overlays/apply.py:ro
     depends_on:
       db:
         condition: service_healthy
