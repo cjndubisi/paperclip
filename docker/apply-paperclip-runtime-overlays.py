@@ -215,4 +215,65 @@ for manager_path in (
     manager_path.write_text(s.replace(old, new, 1))
     changed.append(str(manager_path))
 
+# PATCH-0006: direct Git bundle streams bypass runSshCommand. Stage the
+# script from an argv-carried base64 value, never from binary transfer stdin.
+ssh = Path('/app/packages/adapter-utils/src/ssh.ts')
+if ssh.exists():
+    s = ssh.read_text()
+    marker = '// PATCH-0006-ssh-transfer-script'
+    if marker not in s:
+        anchor = 'async function streamLocalFileToSsh(input: {'
+        helper = '''// PATCH-0006-ssh-transfer-script
+function buildSshTransferCommand(script: string): string {
+  const scriptPath = `/tmp/.paperclip-transfer-${randomUUID()}.sh`;
+  const quotedPath = shellQuote(scriptPath);
+  const encoded = shellQuote(Buffer.from(script, "utf8").toString("base64"));
+  // The pipeline only consumes printf output. The child script inherits the
+  // original stdin, including every byte of a streamed Git bundle.
+  const command = `umask 077; printf %s ${encoded} | base64 -d > ${quotedPath} && sh ${quotedPath}; PCRC=$?; rm -f ${quotedPath}; exit $PCRC`;
+  return `sh -c ${shellQuote(command)}`;
+}
+
+'''
+        old = '`sh -c ${shellQuote(input.remoteScript)}`'
+        if anchor not in s or s.count(old) != 2:
+            raise SystemExit('ssh.ts: PATCH-0006 transfer script anchors changed')
+        s = s.replace(anchor, helper + anchor, 1).replace(old, 'buildSshTransferCommand(input.remoteScript)')
+        ssh.write_text(s)
+        changed.append(str(ssh))
+
+# Keep pipe errors local to the transfer, and wait for stderr to drain before
+# rejecting. ChildProcess 'error' does not observe its stdin/stdout sockets.
+if ssh.exists():
+    s = ssh.read_text()
+    if '// PATCH-0006-transfer-stream-guards' not in s:
+        sections = [
+            ('streamLocalFileToSsh', 'streamSshToLocalFile', '    ', ['ssh'], 'source.destroy();', ['ssh.stdin', 'ssh.stdout'], 'input.progress', 'sshStderr'),
+            ('streamSshToLocalFile', 'importGitWorkspaceToSsh', '    ', ['ssh'], 'sink.destroy();', ['ssh.stdout'], 'input.progress', 'sshStderr'),
+            ('syncDirectoryToSsh', 'syncDirectoryFromSsh', '    ', ['tar', 'ssh'], '', ['ssh.stdin', 'tar.stdout'], 'progress', 'sshStderr + "\\n" + tarStderr'),
+            ('syncDirectoryFromSsh', 'prepareWorkspaceForSshExecution', '      ', ['ssh', 'tar'], '', ['tar.stdin', 'ssh.stdout'], 'progress', 'tarStderr + "\\n" + sshStderr'),
+        ]
+        for name, following, indent, children, cleanup, streams, progress, stderr in sections:
+            start = s.index('async function ' + name + '(')
+            end = s.index('async function ' + following + '(', start)
+            part = s[start:end]
+            a = part.index(indent + 'const fail = (error: Error) => {')
+            b = part.index(indent + '};', a) + len(indent + '};')
+            lines = [
+                '// PATCH-0006-transfer-stream-guards',
+                'const fail = (error: Error) => {',
+                '  if (settled) return;',
+                '  settled = true;',
+                '  const closed = Promise.all([' + ', '.join('new Promise<void>((done) => { if (' + c + '.exitCode !== null || ' + c + '.signalCode !== null) done(); else ' + c + '.once("close", () => done()); })' for c in children) + ']);',
+                '  ' + cleanup,
+                '  ' + progress + '?.counter.destroy();',
+            ]
+            lines += ['  ' + c + '.kill("SIGTERM");' for c in children]
+            lines += ['  void closed.then(() => reject(new Error(`SSH transfer failed: ${error.message}; ${(' + stderr + ').trim()}`, { cause: error })));', '};']
+            lines += [stream + '?.on("error", fail);' for stream in streams]
+            part = part[:a] + '\n'.join(indent + line for line in lines) + part[b:]
+            s = s[:start] + part + s[end:]
+        ssh.write_text(s)
+        changed.append(str(ssh))
+
 print('patched:' + ','.join(changed) if changed else 'already-current')
