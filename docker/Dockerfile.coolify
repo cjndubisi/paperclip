@@ -1,0 +1,5 @@
+ARG PAPERCLIP_IMAGE_TAG=sha-d56be3f
+FROM ghcr.io/paperclipai/paperclip:${PAPERCLIP_IMAGE_TAG}
+
+USER root
+COPY --chown=node:node apply-paperclip-runtime-overlays.py /opt/paperclip-overlays/apply.py

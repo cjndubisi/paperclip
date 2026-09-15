@@ -42,7 +42,15 @@ services:
     # running instance has already applied; see docs/coolify-upgrade.md for
     # the one-command check that reads those labels from the registry without
     # pulling the image.
-    image: "ghcr.io/paperclipai/paperclip:${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
+    # Thin deployment image based on the pinned upstream prebuilt image. The
+    # only added artifact is the versioned runtime-overlay applicator; Paperclip
+    # itself is never rebuilt from source on the VPS.
+    build:
+      context: .
+      dockerfile: Dockerfile.coolify
+      args:
+        PAPERCLIP_IMAGE_TAG: "${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
+    image: "paperclip-coolify:${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
 
     # Coolify-domain fallback, previously a patch to scripts/docker-entrypoint.sh.
     #
@@ -120,11 +128,10 @@ services:
       PAPERCLIP_CODEX_PROVIDERS: '{"providers":{"omniroute":{"name":"OmniRoute","base_url":"${OMNIROUTE_BASE_URL}","env_key":"OPENAI_API_KEY","wire_api":"chat"}},"model_provider":"omniroute"}'
     volumes:
       - paperclip-data:/paperclip
-      # The overlay script is versioned on this deployment branch and mounted
-      # read-only outside the persistent data volume. The entrypoint copies the
-      # current version into /paperclip/patches before applying it, so an old
-      # persisted script cannot silently survive a redeploy.
-      - ./apply-paperclip-runtime-overlays.py:/opt/paperclip-overlays/apply.py:ro
+      # The overlay script is versioned on this deployment branch and baked
+      # into the thin deployment image. The entrypoint copies that immutable
+      # version into /paperclip/patches before applying it, so an old persisted
+      # script cannot silently survive a redeploy.
     depends_on:
       db:
         condition: service_healthy
