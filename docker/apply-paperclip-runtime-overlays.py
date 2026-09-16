@@ -300,4 +300,12 @@ if not patch_0008.exists():
 namespace = {'__name__': '__main__'}
 exec(compile(patch_0008.read_text(), str(patch_0008), 'exec'), namespace)
 
+# PATCH-0008b: baseline capture runs immediately after the upload and must use
+# the same exclusions or it still walks the 2+ GB sibling worktree tree.
+patch_0008b = Path('/opt/paperclip-overlays/patch-0008b-remote-baseline-excludes.py')
+if not patch_0008b.exists():
+    raise SystemExit('PATCH-0008b helper missing from deployment image')
+namespace = {'__name__': '__main__'}
+exec(compile(patch_0008b.read_text(), str(patch_0008b), 'exec'), namespace)
+
 print('patched:' + ','.join(changed) if changed else 'already-current')
