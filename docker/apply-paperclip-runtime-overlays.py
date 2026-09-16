@@ -276,4 +276,20 @@ if ssh.exists():
         ssh.write_text(s)
         changed.append(str(ssh))
 
+# PATCH-0007: stage oversized adapter launch scripts so the Sprite SSH server's
+# ~65 KB exec-request ceiling cannot surface as a false Pi exit 255.
+patch_0007 = Path('/opt/paperclip-overlays/patch-0007-ssh-exec-command-limit.py')
+if not patch_0007.exists():
+    raise SystemExit('PATCH-0007 helper missing from deployment image')
+namespace = {'__name__': '__main__'}
+exec(compile(patch_0007.read_text(), str(patch_0007), 'exec'), namespace)
+
+# PATCH-0008: shared Git workspaces contain Paperclip's sibling worktrees and
+# ignored dependency installs. They are not part of the selected run snapshot.
+patch_0008 = Path('/opt/paperclip-overlays/patch-0008-ssh-workspace-excludes.py')
+if not patch_0008.exists():
+    raise SystemExit('PATCH-0008 helper missing from deployment image')
+namespace = {'__name__': '__main__'}
+exec(compile(patch_0008.read_text(), str(patch_0008), 'exec'), namespace)
+
 print('patched:' + ','.join(changed) if changed else 'already-current')

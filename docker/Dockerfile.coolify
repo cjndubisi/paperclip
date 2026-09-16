@@ -3,3 +3,6 @@ FROM ghcr.io/paperclipai/paperclip:${PAPERCLIP_IMAGE_TAG}
 
 USER root
 COPY --chown=node:node apply-paperclip-runtime-overlays.py /opt/paperclip-overlays/apply.py
+COPY --chown=node:node patch-0007-ssh-exec-command-limit.py /opt/paperclip-overlays/patch-0007-ssh-exec-command-limit.py
+COPY --chown=node:node patch-0008-ssh-workspace-excludes.py /opt/paperclip-overlays/patch-0008-ssh-workspace-excludes.py
+COPY --chown=node:node test-ssh-workspace-excludes.ts /opt/paperclip-overlays/test-ssh-workspace-excludes.ts
