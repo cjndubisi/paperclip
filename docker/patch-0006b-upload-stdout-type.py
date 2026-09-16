@@ -21,7 +21,17 @@ new = '''    ssh.stdin?.on("error", fail);
     // observe. Keeping this listener makes TypeScript narrow it to never.
 
     ssh.stderr?.on("data", (chunk) => {'''
-if old not in s:
-    raise SystemExit('ssh.ts: PATCH-0006b upload listener anchor not found')
-ssh.write_text(s.replace(old, new, 1))
-print('patched:' + str(ssh))
+if old in s:
+    ssh.write_text(s.replace(old, new, 1))
+    print('patched:' + str(ssh))
+    sys.exit(0)
+
+# A fresh image with the corrected PATCH-0006 generator never had the invalid
+# stdout listener. That is already the desired state.
+upload_start = s.index('async function streamLocalFileToSsh(input: {')
+upload_end = s.index('async function streamSshToLocalFile(input: {', upload_start)
+upload = s[upload_start:upload_end]
+if 'ssh.stdin?.on("error", fail);' in upload and 'ssh.stdout?.on("error", fail);' not in upload:
+    print('already-current')
+    sys.exit(0)
+raise SystemExit('ssh.ts: PATCH-0006b upload listener anchor not found')

@@ -76,7 +76,7 @@ services:
       - "--"
       - /bin/sh
       - -c
-      - 'if [ -z "$$PAPERCLIP_PUBLIC_URL" ] && [ -n "$$COOLIFY_URL" ]; then export PAPERCLIP_PUBLIC_URL="$$COOLIFY_URL"; fi; mkdir -p /paperclip/patches; cp /opt/paperclip-overlays/apply.py /paperclip/patches/apply-paperclip-runtime-overlays.py; chown node:node /paperclip/patches/apply-paperclip-runtime-overlays.py; python3 /paperclip/patches/apply-paperclip-runtime-overlays.py; exec docker-entrypoint.sh "$$@"'
+      - 'if [ -z "$$PAPERCLIP_PUBLIC_URL" ] && [ -n "$$COOLIFY_URL" ]; then export PAPERCLIP_PUBLIC_URL="$$COOLIFY_URL"; fi; mkdir -p /paperclip/patches; cp /opt/paperclip-overlays/apply.py /paperclip/patches/apply-paperclip-runtime-overlays.py; chown node:node /paperclip/patches/apply-paperclip-runtime-overlays.py; python3 /paperclip/patches/apply-paperclip-runtime-overlays.py && exec docker-entrypoint.sh "$$@"'
       - sh
 
     # Overriding `entrypoint:` CLEARS the image's CMD (documented Compose
