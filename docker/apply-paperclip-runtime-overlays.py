@@ -248,7 +248,7 @@ if ssh.exists():
     s = ssh.read_text()
     if '// PATCH-0006-transfer-stream-guards' not in s:
         sections = [
-            ('streamLocalFileToSsh', 'streamSshToLocalFile', '    ', ['ssh'], 'source.destroy();', ['ssh.stdin', 'ssh.stdout'], 'input.progress', 'sshStderr'),
+            ('streamLocalFileToSsh', 'streamSshToLocalFile', '    ', ['ssh'], 'source.destroy();', ['ssh.stdin'], 'input.progress', 'sshStderr'),
             ('streamSshToLocalFile', 'importGitWorkspaceToSsh', '    ', ['ssh'], 'sink.destroy();', ['ssh.stdout'], 'input.progress', 'sshStderr'),
             ('syncDirectoryToSsh', 'syncDirectoryFromSsh', '    ', ['tar', 'ssh'], '', ['ssh.stdin', 'tar.stdout'], 'progress', 'sshStderr + "\\n" + tarStderr'),
             ('syncDirectoryFromSsh', 'prepareWorkspaceForSshExecution', '      ', ['ssh', 'tar'], '', ['tar.stdin', 'ssh.stdout'], 'progress', 'tarStderr + "\\n" + sshStderr'),
@@ -275,6 +275,14 @@ if ssh.exists():
             s = s[:start] + part + s[end:]
         ssh.write_text(s)
         changed.append(str(ssh))
+
+# PATCH-0006b: repair the upload-path type regression carried by the first 0006
+# overlay without changing its runtime behaviour (stdout is ignored/null).
+patch_0006b = Path('/opt/paperclip-overlays/patch-0006b-upload-stdout-type.py')
+if not patch_0006b.exists():
+    raise SystemExit('PATCH-0006b helper missing from deployment image')
+namespace = {'__name__': '__main__'}
+exec(compile(patch_0006b.read_text(), str(patch_0006b), 'exec'), namespace)
 
 # PATCH-0007: stage oversized adapter launch scripts so the Sprite SSH server's
 # ~65 KB exec-request ceiling cannot surface as a false Pi exit 255.
