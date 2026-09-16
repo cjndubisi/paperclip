@@ -49,8 +49,8 @@ services:
       context: .
       dockerfile: Dockerfile.coolify
       args:
-        PAPERCLIP_IMAGE_TAG: "${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
-    image: "paperclip-coolify:${PAPERCLIP_IMAGE_TAG:-sha-d56be3f}"
+        PAPERCLIP_IMAGE_TAG: "${PAPERCLIP_IMAGE_TAG:-2026.916.0}"
+    image: "paperclip-coolify:${PAPERCLIP_IMAGE_TAG:-2026.916.0}"
 
     # Coolify-domain fallback, previously a patch to scripts/docker-entrypoint.sh.
     #
@@ -109,6 +109,18 @@ services:
       SERVE_UI: "true"
       PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "public"
+      # Coolify's Traefik (coolify-proxy) terminates TLS and forwards to this
+      # container over a private Docker bridge, so the immediate peer is always
+      # an RFC1918 address. As of v2026.916.0 the same-origin/board-mutation
+      # guard only honours X-Forwarded-Host when Express's `trust proxy fn`
+      # accepts that peer -- an untrusted direct client can no longer promote
+      # its own forwarded host into the trusted-origin set.
+      #
+      # `uniquelocal` trusts private-range peers ONLY. Do NOT use `true`: that
+      # trusts any client and re-opens the header-spoofing hole this release
+      # closed. Express keyword, case-sensitive; parsed by
+      # server/src/middleware/trust-proxy.ts.
+      TRUST_PROXY: "uniquelocal"
       # Coolify-managed magic domain: the service is named `paperclip`, so
       # SERVICE_FQDN_PAPERCLIP_3100 makes Coolify auto-generate a domain named
       # paperclip-<uuid>.coolify.craftsofchijioke.com and inject it as a plain

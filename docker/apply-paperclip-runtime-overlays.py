@@ -285,6 +285,8 @@ for patch_name in (
     'patch-0007-ssh-exec-command-limit.py',
     'patch-0008-ssh-workspace-excludes.py',
     'patch-0008b-remote-baseline-excludes.py',
+    'patch-0009c-ssh-snapshot-ignored.py',
+    'patch-0009-archive-build-output.py',
 ):
     patch_path = Path('/opt/paperclip-overlays') / patch_name
     if not patch_path.exists():

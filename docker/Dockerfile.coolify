@@ -1,4 +1,4 @@
-ARG PAPERCLIP_IMAGE_TAG=sha-d56be3f
+ARG PAPERCLIP_IMAGE_TAG=2026.916.0
 FROM ghcr.io/paperclipai/paperclip:${PAPERCLIP_IMAGE_TAG}
 
 USER root
@@ -7,6 +7,8 @@ COPY --chown=node:node patch-0006b-upload-stdout-type.py /opt/paperclip-overlays
 COPY --chown=node:node patch-0007-ssh-exec-command-limit.py /opt/paperclip-overlays/patch-0007-ssh-exec-command-limit.py
 COPY --chown=node:node patch-0008-ssh-workspace-excludes.py /opt/paperclip-overlays/patch-0008-ssh-workspace-excludes.py
 COPY --chown=node:node patch-0008b-remote-baseline-excludes.py /opt/paperclip-overlays/patch-0008b-remote-baseline-excludes.py
+COPY --chown=node:node patch-0009-archive-build-output.py /opt/paperclip-overlays/patch-0009-archive-build-output.py
+COPY --chown=node:node patch-0009c-ssh-snapshot-ignored.py /opt/paperclip-overlays/patch-0009c-ssh-snapshot-ignored.py
 COPY --chown=node:node test-ssh-workspace-excludes.ts /opt/paperclip-overlays/test-ssh-workspace-excludes.ts
 COPY --chown=node:node test-ssh-oversized.ts /opt/paperclip-overlays/test-ssh-oversized.ts
 COPY --chown=node:node test-remote-managed-workspace-excludes.ts /opt/paperclip-overlays/test-remote-managed-workspace-excludes.ts
