@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Apply durable Paperclip runtime overlays after image replacement."""
 from pathlib import Path
+import subprocess
 import sys
 
 changed = []
@@ -276,36 +277,18 @@ if ssh.exists():
         ssh.write_text(s)
         changed.append(str(ssh))
 
-# PATCH-0006b: repair the upload-path type regression carried by the first 0006
-# overlay without changing its runtime behaviour (stdout is ignored/null).
-patch_0006b = Path('/opt/paperclip-overlays/patch-0006b-upload-stdout-type.py')
-if not patch_0006b.exists():
-    raise SystemExit('PATCH-0006b helper missing from deployment image')
-namespace = {'__name__': '__main__'}
-exec(compile(patch_0006b.read_text(), str(patch_0006b), 'exec'), namespace)
-
-# PATCH-0007: stage oversized adapter launch scripts so the Sprite SSH server's
-# ~65 KB exec-request ceiling cannot surface as a false Pi exit 255.
-patch_0007 = Path('/opt/paperclip-overlays/patch-0007-ssh-exec-command-limit.py')
-if not patch_0007.exists():
-    raise SystemExit('PATCH-0007 helper missing from deployment image')
-namespace = {'__name__': '__main__'}
-exec(compile(patch_0007.read_text(), str(patch_0007), 'exec'), namespace)
-
-# PATCH-0008: shared Git workspaces contain Paperclip's sibling worktrees and
-# ignored dependency installs. They are not part of the selected run snapshot.
-patch_0008 = Path('/opt/paperclip-overlays/patch-0008-ssh-workspace-excludes.py')
-if not patch_0008.exists():
-    raise SystemExit('PATCH-0008 helper missing from deployment image')
-namespace = {'__name__': '__main__'}
-exec(compile(patch_0008.read_text(), str(patch_0008), 'exec'), namespace)
-
-# PATCH-0008b: baseline capture runs immediately after the upload and must use
-# the same exclusions or it still walks the 2+ GB sibling worktree tree.
-patch_0008b = Path('/opt/paperclip-overlays/patch-0008b-remote-baseline-excludes.py')
-if not patch_0008b.exists():
-    raise SystemExit('PATCH-0008b helper missing from deployment image')
-namespace = {'__name__': '__main__'}
-exec(compile(patch_0008b.read_text(), str(patch_0008b), 'exec'), namespace)
+# PATCH-0006b through PATCH-0008b are delegated below. Run them in subprocesses:
+# each helper uses sys.exit(0) for its idempotent already-current path, which
+# must not terminate this parent applicator and skip later patches.
+for patch_name in (
+    'patch-0006b-upload-stdout-type.py',
+    'patch-0007-ssh-exec-command-limit.py',
+    'patch-0008-ssh-workspace-excludes.py',
+    'patch-0008b-remote-baseline-excludes.py',
+):
+    patch_path = Path('/opt/paperclip-overlays') / patch_name
+    if not patch_path.exists():
+        raise SystemExit(f'{patch_name}: missing from deployment image')
+    subprocess.run([sys.executable, str(patch_path)], check=True)
 
 print('patched:' + ','.join(changed) if changed else 'already-current')
