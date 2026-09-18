@@ -635,7 +635,17 @@ async function copyDirectoryContents(sourceDir: string, targetDir: string): Prom
   }));
 }
 
-async function readLocalGitWorkspaceSnapshot(localDir: string): Promise<LocalGitWorkspaceSnapshot | null> {
+/**
+ * @internal Exported ONLY so `ssh-git-snapshot.test.ts` can characterize it
+ * before the convergence onto `readGitWorkspaceSnapshot` in
+ * `git-workspace-sync.ts`. Every real caller is in this file; nothing outside
+ * the package should import it, and the convergence deletes it outright.
+ * The three exported callers (`integrateImportedGitHead`'s retry loop,
+ * `prepareWorkspaceForSshExecution`, `restoreWorkspaceFromSshExecution`) all
+ * require a live SSH endpoint, so driving the reader through them is not
+ * practical on a host without sshd — hence the direct export.
+ */
+export async function readLocalGitWorkspaceSnapshot(localDir: string): Promise<LocalGitWorkspaceSnapshot | null> {
   try {
     const insideWorkTree = await runLocalGit(localDir, ["rev-parse", "--is-inside-work-tree"], {
       timeout: 10_000,
