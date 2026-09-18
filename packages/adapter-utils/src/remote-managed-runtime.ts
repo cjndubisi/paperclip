@@ -5,6 +5,7 @@ import {
   prepareWorkspaceForSshExecution,
   runSshCommand,
   restoreWorkspaceFromSshExecution,
+  sshGitWorkspaceArchiveExcludes,
   syncDirectoryToSsh,
 } from "./ssh.js";
 import {
@@ -32,6 +33,13 @@ const REMOTE_ADDITIONAL_SOURCE_HEAVY_DIR_EXCLUDES = [
   ".cache",
   ".git",
 ].flatMap((entry) => [entry, `${entry}/*`, `*/${entry}`, `*/${entry}/*`]);
+
+// PATCH-0008b-remote-baseline-excludes: baseline capture must prune the
+// same sibling worktrees and dependency installs omitted by the upload archive.
+// Otherwise it can spend minutes walking 2+ GB after upload has already finished.
+export function remoteManagedGitWorkspaceExcludes(): string[] {
+  return sshGitWorkspaceArchiveExcludes();
+}
 
 export interface RemoteManagedRuntimeAsset {
   key: string;
@@ -141,11 +149,17 @@ export async function prepareRemoteManagedRuntime(input: {
         onProgress: input.onProgress,
       })
     : null;
+  // PATCH-0009-gitignore-aware-archive: the baseline and the restore must use the
+  // SAME exclude set as the upload, or the restore walks (and hashes) gigabytes of
+  // gitignored build output the upload never sent.
+  const workspaceExcludes = preparedWorkspace
+    ? preparedWorkspace.gitBacked
+      ? [...remoteManagedGitWorkspaceExcludes(), ...preparedWorkspace.ignoredExcludes]
+      : [".paperclip-runtime"]
+    : [];
   const baselineSnapshot = preparedWorkspace
     ? await captureDirectorySnapshot(input.workspaceLocalDir, {
-        exclude: preparedWorkspace.gitBacked
-          ? [...GIT_ARCHIVE_EXCLUDES, ".paperclip-runtime"]
-          : [".paperclip-runtime"],
+        exclude: workspaceExcludes,
       })
     : null;
 

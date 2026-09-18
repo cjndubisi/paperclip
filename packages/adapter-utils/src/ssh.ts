@@ -149,6 +149,9 @@ interface LocalGitWorkspaceSnapshot {
   headCommit: string;
   branchName: string | null;
   deletedPaths: string[];
+  // PATCH-0009c-ssh-snapshot-ignored: the repo's own `git status --ignored` set,
+  // used to keep gitignored build output out of the archive (both directions).
+  ignoredPaths: string[];
 }
 
 export function shellQuote(value: string) {
@@ -303,6 +306,16 @@ async function spawnText(
       finishReject(Object.assign(error, { code: null }));
     });
 
+    // PATCH-0002-ssh-stdin-epipe: an SSH process can close its input before a
+    // bridge payload finishes writing. Without an error listener, Node treats
+    // the resulting EPIPE as an uncaught exception and exits the whole server.
+    child.stdin?.on("error", (error) => {
+      child.kill("SIGTERM");
+      clearTimers();
+      finishReject(Object.assign(new Error(`Failed to write process stdin: ${error.message}`, {
+        cause: error,
+      }), { code: null }));
+    });
     child.on("close", (code, signal) => {
       clearTimers();
       if (settled) return;
@@ -380,6 +393,12 @@ async function createSshAuthArgs(
     "BatchMode=yes",
     "-o",
     "ConnectTimeout=10",
+    // PATCH-0012-ssh-keepalive: detect a black-holed session within ~60s so a
+    // dropped Sprite/router socket becomes a normal ssh exit instead of a hang.
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=4",
     "-o",
     `StrictHostKeyChecking=${config.strictHostKeyChecking ? "yes" : "no"}`,
   ];
@@ -411,6 +430,14 @@ async function createSshAuthArgs(
 function tarExcludeArgs(exclude: string[] | undefined): string[] {
   const combined = ["._*", ...(exclude ?? [])];
   return combined.flatMap((entry) => ["--exclude", entry]);
+}
+
+// PATCH-0008-ssh-workspace-excludes: a shared project checkout may contain
+// Paperclip's sibling worktrees plus ignored package-manager installs. Neither
+// belongs in one run's remote snapshot; archiving them inflated a 62 MB repo to
+// >2 GB and raced directories that other runs were mutating.
+export function sshGitWorkspaceArchiveExcludes(): string[] {
+  return [".git", ".paperclip-runtime", ".paperclip/worktrees", "node_modules"];
 }
 
 function tarSpawnEnv(): NodeJS.ProcessEnv {
@@ -618,7 +645,7 @@ async function readLocalGitWorkspaceSnapshot(localDir: string): Promise<LocalGit
       return null;
     }
 
-    const [headCommitResult, branchResult, deletedResult] = await Promise.all([
+    const [headCommitResult, branchResult, deletedResult, ignoredResult] = await Promise.all([
       runLocalGit(localDir, ["rev-parse", "HEAD"], {
         timeout: 10_000,
         maxBuffer: 16 * 1024,
@@ -631,6 +658,15 @@ async function readLocalGitWorkspaceSnapshot(localDir: string): Promise<LocalGit
         timeout: 10_000,
         maxBuffer: 256 * 1024,
       }),
+      // PATCH-0009c-ssh-snapshot-ignored: mirrors the sandbox driver's ignore
+      // walk. `--untracked-files=normal` reports an ignored DIRECTORY as one
+      // entry instead of recursing into it, which is what keeps this cheap on a
+      // tree containing a 250 MB .next. Failure is non-fatal: an empty set just
+      // means we fall back to the fixed floor rather than failing the run.
+      runLocalGit(localDir, ["status", "--ignored", "--porcelain=v1", "-z", "--untracked-files=normal"], {
+        timeout: 20_000,
+        maxBuffer: 1024 * 1024,
+      }).catch(() => ({ stdout: "" })),
     ]);
 
     const branchName = branchResult.stdout.trim();
@@ -641,10 +677,26 @@ async function readLocalGitWorkspaceSnapshot(localDir: string): Promise<LocalGit
         .split("\0")
         .map((entry) => entry.trim())
         .filter(Boolean),
+      ignoredPaths: ignoredResult.stdout
+        .split("\0")
+        .filter((entry) => entry.startsWith("!! "))
+        .map((entry) => entry.slice(3).replace(/\/+$/, ""))
+        .filter(Boolean),
     };
   } catch {
     return null;
   }
+}
+
+// PATCH-0006-ssh-transfer-script
+function buildSshTransferCommand(script: string): string {
+  const scriptPath = `/tmp/.paperclip-transfer-${randomUUID()}.sh`;
+  const quotedPath = shellQuote(scriptPath);
+  const encoded = shellQuote(Buffer.from(script, "utf8").toString("base64"));
+  // The pipeline only consumes printf output. The child script inherits the
+  // original stdin, including every byte of a streamed Git bundle.
+  const command = `umask 077; printf %s ${encoded} | base64 -d > ${quotedPath} && sh ${quotedPath}; PCRC=$?; rm -f ${quotedPath}; exit $PCRC`;
+  return `sh -c ${shellQuote(command)}`;
 }
 
 async function streamLocalFileToSsh(input: {
@@ -659,7 +711,7 @@ async function streamLocalFileToSsh(input: {
     "-p",
     String(input.spec.port),
     `${input.spec.username}@${input.spec.host}`,
-    `sh -c ${shellQuote(input.remoteScript)}`,
+    buildSshTransferCommand(input.remoteScript),
   ];
 
   await new Promise<void>((resolve, reject) => {
@@ -671,13 +723,17 @@ async function streamLocalFileToSsh(input: {
     let sshStderr = "";
     let settled = false;
 
+    // PATCH-0006-transfer-stream-guards
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      const closed = Promise.all([new Promise<void>((done) => { if (ssh.exitCode !== null || ssh.signalCode !== null) done(); else ssh.once("close", () => done()); })]);
       source.destroy();
+      input.progress?.counter.destroy();
       ssh.kill("SIGTERM");
-      reject(error);
+      void closed.then(() => reject(new Error(`SSH transfer failed: ${error.message}; ${(sshStderr).trim()}`, { cause: error })));
     };
+    ssh.stdin?.on("error", fail);
 
     ssh.stderr?.on("data", (chunk) => {
       sshStderr += String(chunk);
@@ -714,7 +770,7 @@ async function streamSshToLocalFile(input: {
     "-p",
     String(input.spec.port),
     `${input.spec.username}@${input.spec.host}`,
-    `sh -c ${shellQuote(input.remoteScript)}`,
+    buildSshTransferCommand(input.remoteScript),
   ];
 
   await new Promise<void>((resolve, reject) => {
@@ -726,13 +782,17 @@ async function streamSshToLocalFile(input: {
     let sshStderr = "";
     let settled = false;
 
+    // PATCH-0006-transfer-stream-guards
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
-      ssh.kill("SIGTERM");
+      const closed = Promise.all([new Promise<void>((done) => { if (ssh.exitCode !== null || ssh.signalCode !== null) done(); else ssh.once("close", () => done()); })]);
       sink.destroy();
-      reject(error);
+      input.progress?.counter.destroy();
+      ssh.kill("SIGTERM");
+      void closed.then(() => reject(new Error(`SSH transfer failed: ${error.message}; ${(sshStderr).trim()}`, { cause: error })));
     };
+    ssh.stdout?.on("error", fail);
 
     if (input.progress) {
       input.progress.counter.on("error", fail);
@@ -790,6 +850,12 @@ async function importGitWorkspaceToSsh(input: {
       'trap \'rm -f "$tmp_bundle"\' EXIT',
       'cat > "$tmp_bundle"',
       `if [ ! -d ${shellQuote(path.posix.join(input.remoteDir, ".git"))} ]; then git init ${shellQuote(input.remoteDir)} >/dev/null; fi`,
+      // PATCH-0011-ssh-runtime-git-exclude: the run's live Pi session file and
+      // callback bridge live under <workspace>/.paperclip-runtime. Without a
+      // repo-local exclude, `git stash -u` / `git clean -fd` from the agent
+      // deletes them mid-run and Pi dies with ENOENT on its next append.
+      `mkdir -p ${shellQuote(path.posix.join(input.remoteDir, ".git", "info"))}`,
+      `grep -qxF '/.paperclip-runtime/' ${shellQuote(path.posix.join(input.remoteDir, ".git", "info", "exclude"))} 2>/dev/null || printf '%s\\n' '/.paperclip-runtime/' >> ${shellQuote(path.posix.join(input.remoteDir, ".git", "info", "exclude"))}`,
       // Carry the workspace's (credential-scrubbed) origin into the transported
       // repo so branches there keep a publishable remote instead of reading as
       // remote-less snapshots. set-url covers a reused workspace whose origin
@@ -1224,14 +1290,19 @@ export async function runSshCommand(
     // directly when no .bash_profile exists, so a host that adds nvm in
     // .bashrc still resolves node without a double-run of the setup.
     const envArgs = envEntries.map(([key, value]) => `${key}=${shellQuote(value)}`);
+    // PATCH-0001-ssh-multiline: stage the remote script to a file and run it,
+    // instead of interpolating it into the shell command line.
+    const scriptPath = `/tmp/.paperclip-ssh-${Date.now().toString(36)}-${randomUUID()}.sh`;
+    const runScript = envArgs.length > 0
+      ? `env ${envArgs.join(" ")} sh ${shellQuote(scriptPath)}`
+      : `sh ${shellQuote(scriptPath)}`;
     const remoteScript = [
       'if [ -f /etc/profile ]; then . /etc/profile >/dev/null 2>&1 || true; fi',
       'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile" >/dev/null 2>&1 || true; fi',
       'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile" >/dev/null 2>&1 || true; elif [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc" >/dev/null 2>&1 || true; fi',
       'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile" >/dev/null 2>&1 || true; fi',
-      envArgs.length > 0
-        ? `exec env ${envArgs.join(" ")} sh -c ${shellQuote(remoteCommand)}`
-        : `exec sh -c ${shellQuote(remoteCommand)}`,
+      `printf %s ${shellQuote(Buffer.from(remoteCommand, "utf8").toString("base64"))} | base64 -d > ${shellQuote(scriptPath)}`,
+      `${runScript}; PCRC=$?; rm -f ${shellQuote(scriptPath)}; exit $PCRC`,
     ].join(" && ");
 
     sshArgs.push(
@@ -1256,6 +1327,89 @@ export async function runSshCommand(
   }
 }
 
+// PATCH-0007b-ssh-exec-limit-seam
+export function buildSshRemoteLaunchScript(input: {
+  remoteCwd: string;
+  envArgs: string[];
+  remoteCommandParts: string;
+}): string {
+  return [
+    'if [ -f /etc/profile ]; then . /etc/profile >/dev/null 2>&1 || true; fi',
+    'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile" >/dev/null 2>&1 || true; fi',
+    'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile" >/dev/null 2>&1 || true; elif [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc" >/dev/null 2>&1 || true; fi',
+    'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile" >/dev/null 2>&1 || true; fi',
+    `cd ${shellQuote(input.remoteCwd)}`,
+    input.envArgs.length > 0
+      ? `exec env ${input.envArgs.join(" ")} ${input.remoteCommandParts}`
+      : `exec ${input.remoteCommandParts}`,
+  ].join(" && ");
+}
+
+export const SSH_EXEC_COMMAND_LIMIT_BYTES = 60_000;
+const SSH_EXEC_STAGE_CHUNK_CHARS = 45_000;
+
+export function sshLaunchRequiresRemoteStaging(remoteScript: string): boolean {
+  return Buffer.byteLength(`sh -c ${shellQuote(remoteScript)}`, "utf8") > SSH_EXEC_COMMAND_LIMIT_BYTES;
+}
+
+function dirnamePosix(filePath: string): string {
+  const index = filePath.lastIndexOf("/");
+  return index > 0 ? filePath.slice(0, index) : "/";
+}
+
+async function runSshStagingCommand(input: {
+  spec: SshRemoteExecutionSpec;
+  sshArgs: string[];
+  command: string;
+  description: string;
+}): Promise<void> {
+  try {
+    await execFileText("ssh", [
+      ...input.sshArgs,
+      "-p",
+      String(input.spec.port),
+      `${input.spec.username}@${input.spec.host}`,
+      `sh -c ${shellQuote(input.command)}`,
+    ], { timeout: 60_000, maxBuffer: 1024 * 64 });
+  } catch (error) {
+    const stderr = String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "").trim();
+    throw new Error(`${input.description}: ${(error as Error).message}${stderr ? `; ${stderr}` : ""}`, { cause: error });
+  }
+}
+
+async function stageSshRemoteScript(input: {
+  spec: SshRemoteExecutionSpec;
+  sshArgs: string[];
+  script: string;
+}): Promise<string> {
+  const encoded = Buffer.from(input.script, "utf8").toString("base64");
+  const base = input.spec.remoteCwd?.trim()
+    ? `${input.spec.remoteCwd.replace(/\/+$/, "")}/.paperclip-ssh-stage-${randomUUID()}`
+    : `/tmp/.paperclip-ssh-stage-${randomUUID()}`;
+  const b64Path = `${base}.b64`;
+  const scriptPath = `${base}.sh`;
+  const quotedB64 = shellQuote(b64Path);
+  const quotedScript = shellQuote(scriptPath);
+  for (let offset = 0; offset < encoded.length; offset += SSH_EXEC_STAGE_CHUNK_CHARS) {
+    const chunk = encoded.slice(offset, offset + SSH_EXEC_STAGE_CHUNK_CHARS);
+    const redirect = offset === 0 ? ">" : ">>";
+    await runSshStagingCommand({
+      spec: input.spec,
+      sshArgs: input.sshArgs,
+      command: `umask 077; mkdir -p ${shellQuote(dirnamePosix(b64Path))} && printf %s ${shellQuote(chunk)} ${redirect} ${quotedB64}`,
+      description: "Failed to stage SSH command payload",
+    });
+  }
+  await runSshStagingCommand({
+    spec: input.spec,
+    sshArgs: input.sshArgs,
+    command: `base64 -d < ${quotedB64} > ${quotedScript} && rm -f ${quotedB64}`,
+    description: "Failed to decode staged SSH command payload",
+  });
+  return scriptPath;
+}
+
+// PATCH-0007-ssh-exec-command-limit
 export async function buildSshSpawnTarget(input: {
   spec: SshRemoteExecutionSpec;
   command: string;
@@ -1264,6 +1418,7 @@ export async function buildSshSpawnTarget(input: {
 }): Promise<{
   command: string;
   args: string[];
+  stagedRemoteScriptPath?: string;
   cleanup: () => Promise<void>;
 }> {
   for (const key of Object.keys(input.env)) {
@@ -1288,29 +1443,30 @@ export async function buildSshSpawnTarget(input: {
   // .bash_profile typically sources .bashrc itself; only source .bashrc
   // directly when no .bash_profile exists, so a host that adds nvm in
   // .bashrc still resolves node without a double-run of the setup.
-  const remoteScript = [
-    'if [ -f /etc/profile ]; then . /etc/profile >/dev/null 2>&1 || true; fi',
-    'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile" >/dev/null 2>&1 || true; fi',
-    'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile" >/dev/null 2>&1 || true; elif [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc" >/dev/null 2>&1 || true; fi',
-    'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile" >/dev/null 2>&1 || true; fi',
-    `cd ${shellQuote(input.spec.remoteCwd)}`,
-    envArgs.length > 0
-      ? `exec env ${envArgs.join(" ")} ${remoteCommandParts}`
-      : `exec ${remoteCommandParts}`,
-  ].join(" && ");
+  const remoteScript = buildSshRemoteLaunchScript({
+    remoteCwd: input.spec.remoteCwd,
+    envArgs,
+    remoteCommandParts,
+  });
 
-  sshArgs.push(
-    "-p",
-    String(input.spec.port),
-    `${input.spec.username}@${input.spec.host}`,
-    `sh -c ${shellQuote(remoteScript)}`,
-  );
+  const directExecCommand = `sh -c ${shellQuote(remoteScript)}`;
+  if (!sshLaunchRequiresRemoteStaging(remoteScript)) {
+    sshArgs.push("-p", String(input.spec.port), `${input.spec.username}@${input.spec.host}`, directExecCommand);
+    return { command: "ssh", args: sshArgs, cleanup: auth.cleanup };
+  }
 
-  return {
-    command: "ssh",
-    args: sshArgs,
-    cleanup: auth.cleanup,
-  };
+  let stagedScriptPath: string;
+  try {
+    stagedScriptPath = await stageSshRemoteScript({ spec: input.spec, sshArgs: [...auth.args], script: remoteScript });
+  } catch (error) {
+    await auth.cleanup();
+    throw error;
+  }
+  const quotedStagedPath = shellQuote(stagedScriptPath);
+  // PATCH-0007c-staged-exec-shape
+  const runStagedCommand = `sh -c ${shellQuote(`exec 3< ${quotedStagedPath}; rm -f ${quotedStagedPath}; exec sh /dev/fd/3`)}`;
+  sshArgs.push("-p", String(input.spec.port), `${input.spec.username}@${input.spec.host}`, runStagedCommand);
+  return { command: "ssh", args: sshArgs, stagedRemoteScriptPath: stagedScriptPath, cleanup: auth.cleanup };
 }
 
 export async function syncDirectoryToSsh(input: {
@@ -1393,15 +1549,19 @@ export async function syncDirectoryToSsh(input: {
       resolve();
     };
 
+    // PATCH-0006-transfer-stream-guards
     const fail = (error: Error) => {
-      if (settled) {
-        return;
-      }
+      if (settled) return;
       settled = true;
+      const closed = Promise.all([new Promise<void>((done) => { if (tar.exitCode !== null || tar.signalCode !== null) done(); else tar.once("close", () => done()); }), new Promise<void>((done) => { if (ssh.exitCode !== null || ssh.signalCode !== null) done(); else ssh.once("close", () => done()); })]);
+      
+      progress?.counter.destroy();
       tar.kill("SIGTERM");
       ssh.kill("SIGTERM");
-      reject(error);
+      void closed.then(() => reject(new Error(`SSH transfer failed: ${error.message}; ${(sshStderr + "\n" + tarStderr).trim()}`, { cause: error })));
     };
+    ssh.stdin?.on("error", fail);
+    tar.stdout?.on("error", fail);
 
     if (progress) {
       progress.counter.on("error", fail);
@@ -1506,13 +1666,19 @@ export async function syncDirectoryFromSsh(input: {
         resolve();
       };
 
+      // PATCH-0006-transfer-stream-guards
       const fail = (error: Error) => {
         if (settled) return;
         settled = true;
+        const closed = Promise.all([new Promise<void>((done) => { if (ssh.exitCode !== null || ssh.signalCode !== null) done(); else ssh.once("close", () => done()); }), new Promise<void>((done) => { if (tar.exitCode !== null || tar.signalCode !== null) done(); else tar.once("close", () => done()); })]);
+        
+        progress?.counter.destroy();
         ssh.kill("SIGTERM");
         tar.kill("SIGTERM");
-        reject(error);
+        void closed.then(() => reject(new Error(`SSH transfer failed: ${error.message}; ${(tarStderr + "\n" + sshStderr).trim()}`, { cause: error })));
       };
+      tar.stdin?.on("error", fail);
+      ssh.stdout?.on("error", fail);
 
       if (progress) {
         progress.counter.on("error", fail);
@@ -1553,12 +1719,30 @@ export async function syncDirectoryFromSsh(input: {
   }
 }
 
+// PATCH-0009-gitignore-aware-archive: the sandbox driver merges the repo's own
+// `git status --ignored` set into its tar excludes; the SSH driver computed the
+// same set and discarded it, so every gitignored build artifact crossed the wire
+// twice per run. Return it so the caller applies it to the archive, the baseline
+// snapshot and the restore -- matching sandbox behaviour and each repo's actual
+// .gitignore instead of a hardcoded guess.
+export function sshGitWorkspaceIgnoredExcludes(ignoredPaths: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of ignoredPaths) {
+    const entry = raw.replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!entry || entry.startsWith("..") || entry.startsWith("/")) continue;
+    // Escape tar glob metacharacters so a literal path is matched literally.
+    const literal = entry.replace(/\\/g, "\\\\").replace(/([*?[])/g, "\\$1");
+    out.push(literal, `${literal}/*`);
+  }
+  return [...new Set(out)];
+}
+
 export async function prepareWorkspaceForSshExecution(input: {
   spec: SshRemoteExecutionSpec;
   localDir: string;
   remoteDir?: string;
   onProgress?: RuntimeProgressSink;
-}): Promise<{ gitBacked: boolean }> {
+}): Promise<{ gitBacked: boolean; ignoredExcludes: string[] }> {
   const remoteDir = input.remoteDir ?? input.spec.remoteCwd;
   const gitSnapshot = await readLocalGitWorkspaceSnapshot(input.localDir);
 
@@ -1570,11 +1754,12 @@ export async function prepareWorkspaceForSshExecution(input: {
       snapshot: gitSnapshot,
       onProgress: input.onProgress,
     });
+    const ignoredExcludes = sshGitWorkspaceIgnoredExcludes(gitSnapshot.ignoredPaths ?? []);
     await syncDirectoryToSsh({
       spec: input.spec,
       localDir: input.localDir,
       remoteDir,
-      exclude: [".git", ".paperclip-runtime"],
+      exclude: [...sshGitWorkspaceArchiveExcludes(), ...ignoredExcludes],
       onProgress: input.onProgress,
       progressLabel: "workspace",
     });
@@ -1583,7 +1768,7 @@ export async function prepareWorkspaceForSshExecution(input: {
       remoteDir,
       deletedPaths: gitSnapshot.deletedPaths,
     });
-    return { gitBacked: true };
+    return { gitBacked: true, ignoredExcludes };
   }
 
   await clearRemoteDirectory({
@@ -1599,7 +1784,7 @@ export async function prepareWorkspaceForSshExecution(input: {
     onProgress: input.onProgress,
     progressLabel: "workspace",
   });
-  return { gitBacked: false };
+  return { gitBacked: false, ignoredExcludes: [] };
 }
 
 export async function restoreWorkspaceFromSshExecution(input: {
@@ -1674,7 +1859,7 @@ export async function restoreWorkspaceFromSshExecution(input: {
       spec: input.spec,
       remoteDir,
       localDir: input.localDir,
-      exclude: [".git", ".paperclip-runtime"],
+      exclude: sshGitWorkspaceArchiveExcludes(),
       preserveLocalEntries: [".git"],
       onProgress: input.onProgress,
       progressLabel: "workspace",
