@@ -288,6 +288,7 @@ for patch_name in (
     'patch-0009c-ssh-snapshot-ignored.py',
     'patch-0009-archive-build-output.py',
     'patch-0010-hermes-gateway-comment-cap.py',
+    'patch-0011-ssh-runtime-git-exclude.py',
 ):
     patch_path = Path('/opt/paperclip-overlays') / patch_name
     if not patch_path.exists():

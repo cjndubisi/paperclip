@@ -10,6 +10,7 @@ COPY --chown=node:node patch-0008b-remote-baseline-excludes.py /opt/paperclip-ov
 COPY --chown=node:node patch-0009-archive-build-output.py /opt/paperclip-overlays/patch-0009-archive-build-output.py
 COPY --chown=node:node patch-0009c-ssh-snapshot-ignored.py /opt/paperclip-overlays/patch-0009c-ssh-snapshot-ignored.py
 COPY --chown=node:node patch-0010-hermes-gateway-comment-cap.py /opt/paperclip-overlays/patch-0010-hermes-gateway-comment-cap.py
+COPY --chown=node:node patch-0011-ssh-runtime-git-exclude.py /opt/paperclip-overlays/patch-0011-ssh-runtime-git-exclude.py
 COPY --chown=node:node test-ssh-workspace-excludes.ts /opt/paperclip-overlays/test-ssh-workspace-excludes.ts
 COPY --chown=node:node test-ssh-oversized.ts /opt/paperclip-overlays/test-ssh-oversized.ts
 COPY --chown=node:node test-remote-managed-workspace-excludes.ts /opt/paperclip-overlays/test-remote-managed-workspace-excludes.ts
