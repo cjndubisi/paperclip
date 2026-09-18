@@ -171,12 +171,12 @@ describe("ssh env-lab fixture", () => {
   // this drains it too instead of stranding a listener until the process exits.
   afterAll(drainFixtureTeardowns);
 
-  it("starts an isolated sshd fixture and executes commands through it", async () => {
+  it("starts an isolated sshd fixture and executes commands through it", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH env-lab fixture test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const quotedWorkspace = JSON.stringify(started.workspaceDir);
     const result = await runSshCommand(
@@ -194,7 +194,7 @@ describe("ssh env-lab fixture", () => {
     expect(stopped.running).toBe(false);
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("resolves a relative statePath to the same absolute state across start, status, and stop", async () => {
+  it("resolves a relative statePath to the same absolute state across start, status, and stop", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const absoluteStatePath = path.join(rootDir, "state.json");
     // A path relative to the test process's own working directory. This is
@@ -205,13 +205,13 @@ describe("ssh env-lab fixture", () => {
 
     if (sshEnvLabUnsupportedReason) {
       console.warn(`Skipping relative statePath test: ${sshEnvLabUnsupportedReason}`);
-      return;
+      return ctx.skip();
     }
     const support = await getSshEnvLabSupport();
     if (!support.supported) {
       sshEnvLabUnsupportedReason = support.reason ?? "unsupported environment";
       console.warn(`Skipping relative statePath test: ${sshEnvLabUnsupportedReason}`);
-      return;
+      return ctx.skip();
     }
 
     const entry = fixtureTeardowns.find((candidate) => candidate.rootDir === rootDir);
@@ -225,7 +225,7 @@ describe("ssh env-lab fixture", () => {
     } catch (error) {
       sshEnvLabUnsupportedReason = error instanceof Error ? error.message : String(error);
       console.warn(`Skipping relative statePath test: ${sshEnvLabUnsupportedReason}`);
-      return;
+      return ctx.skip();
     }
     entry.state = state;
 
@@ -244,12 +244,12 @@ describe("ssh env-lab fixture", () => {
     expect(afterStop.running).toBe(false);
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("forwards stdin to remote SSH commands", async () => {
+  it("forwards stdin to remote SSH commands", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH stdin forwarding test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const remotePath = path.posix.join(started.workspaceDir, "stdin-forwarded.txt");
 
@@ -272,12 +272,12 @@ describe("ssh env-lab fixture", () => {
     expect(result.stdout).toBe("hello over ssh stdin\n");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("does not treat an unrelated reused pid as the running fixture", async () => {
+  it("does not treat an unrelated reused pid as the running fixture", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH env-lab fixture test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     await stopSshEnvLabFixture(started);
     await mkdir(path.dirname(statePath), { recursive: true });
 
@@ -291,13 +291,13 @@ describe("ssh env-lab fixture", () => {
     expect(staleStatus.running).toBe(false);
 
     const restarted = await startSshEnvLabFixtureOrSkip(statePath, "SSH env-lab fixture restart test");
-    if (!restarted) return;
+    if (!restarted) return ctx.skip();
     expect(restarted.pid).not.toBe(process.pid);
 
     await stopSshEnvLabFixture(restarted);
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("rejects a forged state file and cannot signal an unrelated local process", async () => {
+  it("rejects a forged state file and cannot signal an unrelated local process", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
 
@@ -364,12 +364,12 @@ describe("ssh env-lab fixture", () => {
     }
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("stops the fixture listener and frees its loopback port", async () => {
+  it("stops the fixture listener and frees its loopback port", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH teardown regression test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const { pid, port, bindHost } = started;
 
     await stopSshEnvLabFixture(started);
@@ -393,16 +393,16 @@ describe("ssh env-lab fixture", () => {
     });
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("leaves no live listener and no root directory when the fixture fails readiness", async () => {
+  it("leaves no live listener and no root directory when the fixture fails readiness", async (ctx) => {
     if (sshEnvLabUnsupportedReason) {
       console.warn(`Skipping SSH readiness-failure cleanup test: ${sshEnvLabUnsupportedReason}`);
-      return;
+      return ctx.skip();
     }
     const support = await getSshEnvLabSupport();
     if (!support.supported) {
       sshEnvLabUnsupportedReason = support.reason ?? "unsupported environment";
       console.warn(`Skipping SSH readiness-failure cleanup test: ${sshEnvLabUnsupportedReason}`);
-      return;
+      return ctx.skip();
     }
 
     const rootDir = await createFixtureRootDir();
@@ -447,7 +447,7 @@ describe("ssh env-lab fixture", () => {
     await expect(stat(rootDir)).rejects.toThrow();
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("builds a remote script that sources login profiles but no nvm", async () => {
+  it("builds a remote script that sources login profiles but no nvm", async (ctx) => {
     const target = await buildSshSpawnTarget({
       spec: {
         host: "ssh.example.test",
@@ -490,7 +490,7 @@ describe("ssh env-lab fixture", () => {
     await target.cleanup();
   });
 
-  it("rejects invalid environment variable keys when constructing SSH spawn targets", async () => {
+  it("rejects invalid environment variable keys when constructing SSH spawn targets", async (ctx) => {
     await expect(
       buildSshSpawnTarget({
         spec: {
@@ -512,7 +512,7 @@ describe("ssh env-lab fixture", () => {
     ).rejects.toThrow("Invalid SSH environment variable key: BAD KEY");
   });
 
-  it("syncs a local directory into the remote fixture workspace", async () => {
+  it("syncs a local directory into the remote fixture workspace", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localDir = path.join(rootDir, "local-overlay");
@@ -522,7 +522,7 @@ describe("ssh env-lab fixture", () => {
     await writeFile(path.join(localDir, "._message.txt"), "should never sync\n", "utf8");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH env-lab fixture test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const remoteDir = path.posix.join(started.workspaceDir, "overlay");
 
@@ -544,7 +544,7 @@ describe("ssh env-lab fixture", () => {
     expect(result.stdout).not.toContain("appledouble-present");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("reports throttled upload progress with a clamped percent and terminal 100% line", async () => {
+  it("reports throttled upload progress with a clamped percent and terminal 100% line", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localDir = path.join(rootDir, "local-overlay");
@@ -557,7 +557,7 @@ describe("ssh env-lab fixture", () => {
     }
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH upload progress test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const remoteDir = path.posix.join(started.workspaceDir, "overlay-progress");
 
@@ -591,7 +591,7 @@ describe("ssh env-lab fixture", () => {
     expect(last.doneMb).toBe(last.totalMb);
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("reports restore progress with a terminal completion line", async () => {
+  it("reports restore progress with a terminal completion line", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localDir = path.join(rootDir, "local-overlay");
@@ -604,7 +604,7 @@ describe("ssh env-lab fixture", () => {
     }
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH restore progress test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = { ...config, remoteCwd: started.workspaceDir } as const;
     const remoteDir = path.posix.join(started.workspaceDir, "restore-source");
@@ -636,7 +636,7 @@ describe("ssh env-lab fixture", () => {
     );
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("reports exact git-history import percentage from the known bundle size", async () => {
+  it("reports exact git-history import percentage from the known bundle size", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -651,7 +651,7 @@ describe("ssh env-lab fixture", () => {
     await git(localRepo, ["commit", "-m", "initial"]);
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH git import progress test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = { ...config, remoteCwd: started.workspaceDir } as const;
 
@@ -677,7 +677,7 @@ describe("ssh env-lab fixture", () => {
     expect(lastImport.doneMb).toBe(lastImport.totalMb);
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("can dereference local symlinks while syncing to the remote fixture", async () => {
+  it("can dereference local symlinks while syncing to the remote fixture", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const sourceDir = path.join(rootDir, "source");
@@ -689,7 +689,7 @@ describe("ssh env-lab fixture", () => {
     await symlink(path.join(sourceDir, "auth.json"), path.join(localDir, "auth.json"));
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH symlink sync test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const remoteDir = path.posix.join(started.workspaceDir, "overlay-follow-links");
 
@@ -712,7 +712,7 @@ describe("ssh env-lab fixture", () => {
     expect(result.stdout).toContain("{\"token\":\"secret\"}");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("round-trips a git workspace through the SSH fixture", async () => {
+  it("round-trips a git workspace through the SSH fixture", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -731,7 +731,7 @@ describe("ssh env-lab fixture", () => {
     await writeFile(path.join(localRepo, "untracked.txt"), "from local\n", "utf8");
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "SSH workspace round-trip test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
@@ -771,7 +771,7 @@ describe("ssh env-lab fixture", () => {
     expect(await git(localRepo, ["status", "--short"])).not.toContain("._tracked.txt");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("preserves both concurrent SSH restores in a shared git workspace", async () => {
+  it("preserves both concurrent SSH restores in a shared git workspace", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -786,7 +786,7 @@ describe("ssh env-lab fixture", () => {
     await git(localRepo, ["commit", "-m", "initial"]);
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "concurrent SSH restore test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
@@ -828,7 +828,7 @@ describe("ssh env-lab fixture", () => {
     await expect(readFile(path.join(localRepo, "run-b.txt"), "utf8")).resolves.toBe("from run b\n");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("preserves nested per-run files across sequential SSH restores with stale baselines", async () => {
+  it("preserves nested per-run files across sequential SSH restores with stale baselines", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -843,7 +843,7 @@ describe("ssh env-lab fixture", () => {
     await git(localRepo, ["commit", "-m", "initial"]);
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "sequential nested SSH restore test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
@@ -883,7 +883,7 @@ describe("ssh env-lab fixture", () => {
       .toBe("from run b\n");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("round-trips remote git commits through the managed runtime restore path", async () => {
+  it("round-trips remote git commits through the managed runtime restore path", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -898,7 +898,7 @@ describe("ssh env-lab fixture", () => {
     await git(localRepo, ["commit", "-m", "initial"]);
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "managed-runtime SSH git round-trip test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
@@ -924,7 +924,7 @@ describe("ssh env-lab fixture", () => {
     await expect(readFile(path.join(localRepo, "tracked.txt"), "utf8")).resolves.toBe("dirty remote\n");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("propagates remote commits to the local worktree with no git remote configured (no-remote-git contract)", async () => {
+  it("propagates remote commits to the local worktree with no git remote configured (no-remote-git contract)", async (ctx) => {
     // Locks in the architectural contract documented in
     // packages/adapter-utils/README.md and packages/adapters/AUTHORING.md:
     // the local execution-workspace cwd is the only persistence boundary
@@ -951,7 +951,7 @@ describe("ssh env-lab fixture", () => {
       statePath,
       "no-remote-git contract test",
     );
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
@@ -985,7 +985,7 @@ describe("ssh env-lab fixture", () => {
     expect(await git(localRepo, ["remote"])).toBe("");
   }, SSH_FIXTURE_TEST_TIMEOUT_MS);
 
-  it("merges concurrent remote commits through the managed runtime restore path", async () => {
+  it("merges concurrent remote commits through the managed runtime restore path", async (ctx) => {
     const rootDir = await createFixtureRootDir();
     const statePath = path.join(rootDir, "state.json");
     const localRepo = path.join(rootDir, "local-workspace");
@@ -1000,7 +1000,7 @@ describe("ssh env-lab fixture", () => {
     await git(localRepo, ["commit", "-m", "initial"]);
 
     const started = await startSshEnvLabFixtureOrSkip(statePath, "concurrent managed-runtime SSH git merge test");
-    if (!started) return;
+    if (!started) return ctx.skip();
     const config = await buildSshEnvLabFixtureConfig(started);
     const spec = {
       ...config,
