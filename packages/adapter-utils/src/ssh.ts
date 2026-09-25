@@ -1356,10 +1356,30 @@ export function buildSshRemoteLaunchScript(input: {
 }
 
 export const SSH_EXEC_COMMAND_LIMIT_BYTES = 60_000;
-const SSH_EXEC_STAGE_CHUNK_CHARS = 45_000;
+const SSH_EXEC_STAGE_CHUNK_CHARS = 30_000;
+
+// PATCH-0007d-ssh-exec-wire-size: `sprite proxy --ssh` forwards the exec command
+// PERCENT-ENCODED in a URL, and the ~65.3 KB refusal applies to that encoded
+// form, not the raw bytes. Every byte outside [A-Za-z0-9-_.~] costs 3 on the
+// wire, so a prompt full of quotes/spaces/newlines (each `'` also expands to
+// `'"'"'` under shellQuote) blows the limit at ~46 KB raw. Measured on role-qa:
+// 65,260 raw `x` passes, 23,036 raw `{}` (69,072 encoded) is refused -> rc 255,
+// empty stderr, Pi never starts. Measure the conservative encoded size.
+export function sshExecCommandWireBytes(command: string): number {
+  let size = 0;
+  for (const byte of Buffer.from(command, "utf8")) {
+    const unreserved =
+      (byte >= 0x30 && byte <= 0x39) ||
+      (byte >= 0x41 && byte <= 0x5a) ||
+      (byte >= 0x61 && byte <= 0x7a) ||
+      byte === 0x2d || byte === 0x2e || byte === 0x5f || byte === 0x7e;
+    size += unreserved ? 1 : 3;
+  }
+  return size;
+}
 
 export function sshLaunchRequiresRemoteStaging(remoteScript: string): boolean {
-  return Buffer.byteLength(`sh -c ${shellQuote(remoteScript)}`, "utf8") > SSH_EXEC_COMMAND_LIMIT_BYTES;
+  return sshExecCommandWireBytes(`sh -c ${shellQuote(remoteScript)}`) > SSH_EXEC_COMMAND_LIMIT_BYTES;
 }
 
 function dirnamePosix(filePath: string): string {

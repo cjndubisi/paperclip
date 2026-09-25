@@ -283,6 +283,7 @@ if ssh.exists():
 for patch_name in (
     'patch-0006b-upload-stdout-type.py',
     'patch-0007-ssh-exec-command-limit.py',
+    'patch-0007d-ssh-exec-wire-size.py',
     'patch-0008-ssh-workspace-excludes.py',
     'patch-0008b-remote-baseline-excludes.py',
     'patch-0009c-ssh-snapshot-ignored.py',

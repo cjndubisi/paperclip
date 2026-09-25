@@ -5,6 +5,7 @@ USER root
 COPY --chown=node:node apply-paperclip-runtime-overlays.py /opt/paperclip-overlays/apply.py
 COPY --chown=node:node patch-0006b-upload-stdout-type.py /opt/paperclip-overlays/patch-0006b-upload-stdout-type.py
 COPY --chown=node:node patch-0007-ssh-exec-command-limit.py /opt/paperclip-overlays/patch-0007-ssh-exec-command-limit.py
+COPY --chown=node:node patch-0007d-ssh-exec-wire-size.py /opt/paperclip-overlays/patch-0007d-ssh-exec-wire-size.py
 COPY --chown=node:node patch-0008-ssh-workspace-excludes.py /opt/paperclip-overlays/patch-0008-ssh-workspace-excludes.py
 COPY --chown=node:node patch-0008b-remote-baseline-excludes.py /opt/paperclip-overlays/patch-0008b-remote-baseline-excludes.py
 COPY --chown=node:node patch-0009-archive-build-output.py /opt/paperclip-overlays/patch-0009-archive-build-output.py
