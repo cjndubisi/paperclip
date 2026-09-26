@@ -392,7 +392,9 @@ async function createSshAuthArgs(
     "-o",
     "BatchMode=yes",
     "-o",
-    "ConnectTimeout=10",
+    // PATCH-0012b-ssh-connect-timeout: a cold sprite only sends its banner once
+    // the VM boots (>10s), and lease acquisition is not retried.
+    "ConnectTimeout=60",
     // PATCH-0012-ssh-keepalive: detect a black-holed session within ~60s so a
     // dropped Sprite/router socket becomes a normal ssh exit instead of a hang.
     "-o",
