@@ -16,9 +16,14 @@ resume costs ~21.5s (warm: ~150ms), so 21.5s against a 15s timer is a
 deterministic failure. Lease acquisition is one-shot and not retried, so one
 cold wake kills the run.
 
-Fix: pass an explicit 90s timeoutMs at the probe's own call site. 90 > the 60s
-ConnectTimeout, so ssh's own bound stays the one that decides a genuinely dead
-host, and the Node timer goes back to being a backstop instead of the trigger.
+Fix: pass an explicit 180s timeoutMs at the probe's own call site. 180 > the
+60s ConnectTimeout, so the Node timer is a backstop, not the trigger.
+
+Revision (2026-09-26): 90s was not enough. A COLD sprite (evicted, not merely
+paused/warm) booted in 97.7s through the proxy (`/proc/uptime` ~97 on arrival),
+and Argus then failed 4 runs in a row at ~91s each (1c943c01, def040a8,
+2f4b255a, 6ca634cb). 180s covers a cold boot with margin; a dead host now takes
+3 min to fail, which CJ accepted.
 A warm box still returns in ~150ms, so this costs nothing on the happy path.
 
 Narrow by construction: `ensureSshWorkspaceReady` is used only by the lease /
@@ -35,8 +40,20 @@ if not p.exists():
     raise SystemExit('ssh.ts not found')
 s = p.read_text()
 MARKER = 'PATCH-0012c-lease-probe-timeout'
+TIMEOUT = '{ timeoutMs: 180_000 },'
 if MARKER in s:
-    print('already-current')
+    # Upgrade an in-place /app patched by the earlier 90s revision (a plain
+    # restart keeps the patched /app, so the marker alone is not proof).
+    start = s.index(MARKER)
+    window = s[start:start + 600]
+    if TIMEOUT in window:
+        print('already-current')
+        sys.exit(0)
+    if '{ timeoutMs: 90_000 },' not in window:
+        raise SystemExit('ssh.ts: PATCH-0012c marker present but timeout line not recognised')
+    s = s[:start] + window.replace('{ timeoutMs: 90_000 },', TIMEOUT, 1) + s[start + 600:]
+    p.write_text(s)
+    print('upgraded 90s->180s:' + str(p))
     sys.exit(0)
 
 OLD = '''export async function ensureSshWorkspaceReady(
@@ -54,10 +71,9 @@ NEW = '''export async function ensureSshWorkspaceReady(
     config,
     `mkdir -p ${shellQuote(config.remoteWorkspacePath)} && cd ${shellQuote(config.remoteWorkspacePath)} && pwd`,
     // PATCH-0012c-lease-probe-timeout: the default 15s kill undercut
-    // ConnectTimeout=60, so a cold sprite (~21.5s to banner) died at 15s with
-    // rc 255 and empty stderr. Keep this above ConnectTimeout so ssh's own
-    // bound decides a dead host; lease acquisition is not retried.
-    { timeoutMs: 90_000 },
+    // ConnectTimeout=60. A warm sprite resumes in ~21s but a COLD one took
+    // 97.7s to boot, so 90s also failed. Lease acquisition is not retried.
+    { timeoutMs: 180_000 },
   );'''
 
 if OLD not in s:
