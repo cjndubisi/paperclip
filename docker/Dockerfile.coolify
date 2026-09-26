@@ -14,6 +14,7 @@ COPY --chown=node:node patch-0010-hermes-gateway-comment-cap.py /opt/paperclip-o
 COPY --chown=node:node patch-0011-ssh-runtime-git-exclude.py /opt/paperclip-overlays/patch-0011-ssh-runtime-git-exclude.py
 COPY --chown=node:node patch-0012-ssh-keepalive.py /opt/paperclip-overlays/patch-0012-ssh-keepalive.py
 COPY --chown=node:node patch-0012b-ssh-connect-timeout.py /opt/paperclip-overlays/patch-0012b-ssh-connect-timeout.py
+COPY --chown=node:node patch-0012c-lease-probe-timeout.py /opt/paperclip-overlays/patch-0012c-lease-probe-timeout.py
 COPY --chown=node:node test-ssh-workspace-excludes.ts /opt/paperclip-overlays/test-ssh-workspace-excludes.ts
 COPY --chown=node:node test-ssh-oversized.ts /opt/paperclip-overlays/test-ssh-oversized.ts
 COPY --chown=node:node test-remote-managed-workspace-excludes.ts /opt/paperclip-overlays/test-remote-managed-workspace-excludes.ts

@@ -292,6 +292,7 @@ for patch_name in (
     'patch-0011-ssh-runtime-git-exclude.py',
     'patch-0012-ssh-keepalive.py',
     'patch-0012b-ssh-connect-timeout.py',
+    'patch-0012c-lease-probe-timeout.py',
 ):
     patch_path = Path('/opt/paperclip-overlays') / patch_name
     if not patch_path.exists():
