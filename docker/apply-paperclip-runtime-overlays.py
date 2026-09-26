@@ -294,6 +294,7 @@ for patch_name in (
     'patch-0012b-ssh-connect-timeout.py',
     'patch-0012c-lease-probe-timeout.py',
     'patch-0012d-clear-remote-dir-timeout.py',
+    'patch-0013-nongit-root-nested-ignores.py',
 ):
     patch_path = Path('/opt/paperclip-overlays') / patch_name
     if not patch_path.exists():
