@@ -144,6 +144,13 @@ services:
       # into the thin deployment image. The entrypoint copies that immutable
       # version into /paperclip/patches before applying it, so an old persisted
       # script cannot silently survive a redeploy.
+    # Reach the private Hermes gateway (Coolify app xc0sgw880o444gw8w8sokk04)
+    # by its compose service name, `gateway`. hermes_gateway agents use
+    # http://gateway:8642/ and :8643/. Without this, every redeploy drops the
+    # hand-made `docker network connect` and those runs fail with EAI_AGAIN.
+    networks:
+      - default
+      - hermes
     depends_on:
       db:
         condition: service_healthy
@@ -152,6 +159,11 @@ services:
         limits:
           cpus: '2.0'
           memory: 3G
+
+networks:
+  hermes:
+    name: xc0sgw880o444gw8w8sokk04
+    external: true
 
 volumes:
   pgdata:
