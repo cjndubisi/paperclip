@@ -17,6 +17,7 @@ COPY --chown=node:node patch-0012b-ssh-connect-timeout.py /opt/paperclip-overlay
 COPY --chown=node:node patch-0012c-lease-probe-timeout.py /opt/paperclip-overlays/patch-0012c-lease-probe-timeout.py
 COPY --chown=node:node patch-0012d-clear-remote-dir-timeout.py /opt/paperclip-overlays/patch-0012d-clear-remote-dir-timeout.py
 COPY --chown=node:node patch-0013-nongit-root-nested-ignores.py /opt/paperclip-overlays/patch-0013-nongit-root-nested-ignores.py
+COPY --chown=node:node patch-0014-mcp-session-per-run.py /opt/paperclip-overlays/patch-0014-mcp-session-per-run.py
 COPY --chown=node:node test-ssh-workspace-excludes.ts /opt/paperclip-overlays/test-ssh-workspace-excludes.ts
 COPY --chown=node:node test-ssh-oversized.ts /opt/paperclip-overlays/test-ssh-oversized.ts
 COPY --chown=node:node test-remote-managed-workspace-excludes.ts /opt/paperclip-overlays/test-remote-managed-workspace-excludes.ts
