@@ -190,7 +190,10 @@ NEW_SYNC_START = '''  try {
       await pullVerifiedFromSsh({
         spec: input.spec,
         producerScript: remoteTarScript,
-        stagingDir: "/tmp",
+        // Stage under the run's remote dir: its path carries /runs/<runId>/, which the sprites-ssh-v2
+        // router needs to route `cat`/`rm` to the run's box. A /tmp path has no run id, so those
+        // connections fell through to the shared probe box and fetched 0 bytes (2026-11-16, REM-583..585).
+        stagingDir: path.posix.join(input.remoteDir, ".paperclip-runtime"),
         localFile: archive,
         progress: progress ?? undefined,
       });

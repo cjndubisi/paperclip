@@ -78,4 +78,15 @@ describe("PATCH-0015 verified ssh pull", () => {
     expect(scripts[0]).toContain(`mkdir -p '/tmp/a'"'"'; rm -rf ~; '"'"''`);
     expect(scripts[0]).not.toMatch(/mkdir -p \/tmp\/a'; rm/);
   });
+
+  it("syncDirectoryFromSsh stages under the run dir so the sprites router can route every pull connection", async () => {
+    // Regression (2026-11-16): staging in /tmp carried no /runs/<id>/ marker, the router sent the
+    // fetch to the shared probe box and every attempt read 0 bytes.
+    const src = (await import("node:fs")).readFileSync(new URL("./ssh.ts", import.meta.url), "utf8");
+    const body = src.slice(src.indexOf("export async function syncDirectoryFromSsh"), src.indexOf("// PATCH-0009-gitignore-aware-archive"));
+    expect(body).toContain('stagingDir: path.posix.join(input.remoteDir, ".paperclip-runtime")');
+    expect(body).not.toContain('stagingDir: "/tmp"');
+    const exp = src.slice(src.indexOf("async function exportGitWorkspaceFromSsh"), src.indexOf("async function integrateImportedGitHead"));
+    expect(exp).toContain('stagingDir: path.posix.join(input.remoteDir, ".paperclip-runtime")');
+  });
 });
