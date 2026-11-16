@@ -89,4 +89,21 @@ describe("PATCH-0015 verified ssh pull", () => {
     const exp = src.slice(src.indexOf("async function exportGitWorkspaceFromSsh"), src.indexOf("async function integrateImportedGitHead"));
     expect(exp).toContain('stagingDir: path.posix.join(input.remoteDir, ".paperclip-runtime")');
   });
+
+  it("reports a producer failure explicitly and never retries it; empty reply stays a retryable drop", async () => {
+    expect(() => parseStagedPullMeta("PCSTAGEFAIL 128 fatal: bad object HEAD")).toThrow(/producer failed \(exit 128\): fatal: bad object HEAD/);
+    let n = 0;
+    await expect(pullVerifiedFromSsh({ spec, producerScript: "x", stagingDir: "/r/runs/x", localFile: tmpFile(), sleep: noSleep,
+      fetch: fetcher([]).fn, run: async (_s, sc) => { if (sc.startsWith("rm")) return { stdout: "" }; n++; return { stdout: "PCSTAGEFAIL 2 tar: oops\n" }; } })).rejects.toThrow(/producer failed/);
+    expect(n).toBe(1);
+  });
+
+  it("stage script runs the producer in a child sh fed by a quoted heredoc (no expansion, own set -e/traps)", async () => {
+    const scripts: string[] = [];
+    await pullVerifiedFromSsh({ spec, producerScript: "set -e\ntrap 'echo bye' EXIT\necho $HOME", stagingDir: "/r", localFile: tmpFile(), sleep: noSleep,
+      fetch: fetcher(["ok"]).fn, run: async (_s, sc) => { scripts.push(sc); return { stdout: sc.startsWith("rm") ? "" : meta }; } });
+    expect(scripts[0]).toMatch(/sh -s > '\/r\/pull-[0-9a-f-]+\.bin' 2> '\/r\/pull-[0-9a-f-]+\.bin\.err' <<'PCPRODUCER_EOF'\nset -e\ntrap 'echo bye' EXIT\necho \$HOME\nPCPRODUCER_EOF/);
+    const outside = scripts[0]!.replace(/<<'PCPRODUCER_EOF'\n[\s\S]*?\nPCPRODUCER_EOF/, "");
+    expect(outside).not.toMatch(/^set -e/m);   // the wrapper itself must survive a failing producer
+  });
 });

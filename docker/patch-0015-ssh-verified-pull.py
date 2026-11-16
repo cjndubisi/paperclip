@@ -61,6 +61,8 @@ export function isDroppedSshPull(error: unknown): boolean {
 
 export function parseStagedPullMeta(stdout: string): { bytes: number; sha256: string } {
   const line = stdout.trim().split("\n").filter((l) => l.trim()).pop() ?? "";
+  const fail = /^PCSTAGEFAIL (\d+) ?(.*)$/.exec(line.trim());
+  if (fail) throw Object.assign(new Error(`staged pull: producer failed (exit ${fail[1]}): ${fail[2]!.slice(0, 300)}`), { producerFailed: true });
   const m = /^PCSTAGED (\d+) ([0-9a-f]{64})$/.exec(line.trim());
   if (!m) throw new Error(`staged pull: unexpected stage output: ${JSON.stringify(line.slice(0, 120))}`);
   return { bytes: Number(m[1]), sha256: m[2]! };
@@ -96,10 +98,16 @@ export async function pullVerifiedFromSsh(input: {
     runSshScript(spec, script, { timeoutMs: 600_000, maxBuffer: 64 * 1024 }));
   const staged = path.posix.join(input.stagingDir, `pull-${randomUUID()}.bin`);
   const q = shellQuote(staged);
+  // The producer runs as its own `sh` (stdin script) so its `set -e`/traps can never abort this
+  // wrapper before it reports. A failure is reported as PCSTAGEFAIL <rc> + stderr tail instead of
+  // an empty reply (empty is reserved for a dropped connection and is retried).
+  const errq = shellQuote(`${staged}.err`);
   const stageScript = [
-    "set -e",
-    `mkdir -p ${shellQuote(input.stagingDir)}`,
-    `( ${input.producerScript} ) > ${q}`,
+    `mkdir -p ${shellQuote(input.stagingDir)} || { echo "PCSTAGEFAIL 97 mkdir"; exit 0; }`,
+    `sh -s > ${q} 2> ${errq} <<'PCPRODUCER_EOF'\n${input.producerScript}\nPCPRODUCER_EOF`,
+    `rc=$?`,
+    `if [ "$rc" -ne 0 ]; then printf 'PCSTAGEFAIL %s %s\\n' "$rc" "$(tail -c 400 ${errq} | tr '\\n' ' ')"; rm -f ${q} ${errq}; exit 0; fi`,
+    `rm -f ${errq}`,
     `printf 'PCSTAGED %s %s\\n' "$(wc -c < ${q} | tr -d ' ')" "$(sha256sum ${q} | cut -d' ' -f1)"`,
   ].join("\n");
 
