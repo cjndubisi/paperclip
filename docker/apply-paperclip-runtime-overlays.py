@@ -296,6 +296,7 @@ for patch_name in (
     'patch-0012d-clear-remote-dir-timeout.py',
     'patch-0013-nongit-root-nested-ignores.py',
     'patch-0014-mcp-session-per-run.py',
+    'patch-0015-ssh-verified-pull.py',
 ):
     patch_path = Path('/opt/paperclip-overlays') / patch_name
     if not patch_path.exists():
